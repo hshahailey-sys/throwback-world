@@ -1,0 +1,10 @@
+const express=require('express'),http=require('http'),WebSocket=require('ws'),fs=require('fs'),path=require('path');
+const app=express(),server=http.createServer(app),wss=new WebSocket.Server({server});
+const DB=path.join(__dirname,'users.json'); let users={}; try{users=JSON.parse(fs.readFileSync(DB,'utf8'))}catch{}
+const online=new Map(); const save=()=>fs.writeFileSync(DB,JSON.stringify(users,null,2));
+app.use(express.json()); app.use(express.static(path.join(__dirname,'public')));
+app.post('/api/signup',(req,res)=>{let username=String(req.body.username||'').trim(); if(!/^[A-Za-z0-9_]{3,16}$/.test(username))return res.status(400).json({error:'Use 3–16 letters, numbers, or underscores.'});let key=username.toLowerCase();if(users[key])return res.status(409).json({error:'That username is already taken.'});users[key]={username,verified:key==='canblixe',createdAt:new Date().toISOString()};save();res.json(users[key]);});
+app.get('/api/user/:name',(req,res)=>{const u=users[req.params.name.toLowerCase()];u?res.json(u):res.status(404).json({error:'Not found'});});
+wss.on('connection',ws=>{let name=null;ws.on('message',raw=>{let m;try{m=JSON.parse(raw)}catch{return}if(m.type==='join'){const u=users[String(m.username||'').toLowerCase()];if(!u){ws.send(JSON.stringify({type:'error',message:'Create an account first.'}));return}name=u.username;online.set(name,{ws,x:0,z:0,look:m.look||{}});broadcast();}if(m.type==='move'&&name){let p=online.get(name);if(p){p.x=Number(m.x)||0;p.z=Number(m.z)||0;p.look=m.look||p.look;broadcast()}}if(m.type==='chat'&&name){const msg={type:'chat',username:name,text:String(m.text||'').slice(0,120)};wss.clients.forEach(c=>c.readyState===1&&c.send(JSON.stringify(msg)))}});ws.on('close',()=>{if(name){online.delete(name);broadcast()}})});
+function broadcast(){const players=[...online].map(([username,p])=>({username,x:p.x,z:p.z,look:p.look,verified:!!users[username.toLowerCase()]?.verified}));wss.clients.forEach(c=>c.readyState===1&&c.send(JSON.stringify({type:'players',players})));}
+const port=process.env.PORT||3000;server.listen(port,()=>console.log(`Throwback World running at http://localhost:${port}`));
